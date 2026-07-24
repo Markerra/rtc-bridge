@@ -12,6 +12,7 @@ repositories {
 
 dependencies {
     implementation("com.google.code.gson:gson:2.13.2")
+    implementation("com.microsoft.playwright:playwright:1.60.0")
     implementation("org.java-websocket:Java-WebSocket:1.6.0")
 
     testImplementation(platform("org.junit:junit-bom:6.0.0"))
@@ -41,6 +42,15 @@ fun registerClientTask(name: String, mainClassName: String) {
 
 registerClientTask("runTestSource", "me.markerra.rtcbridge.testclient.PcmTestSource")
 registerClientTask("runTestConsumer", "me.markerra.rtcbridge.testclient.PcmTestConsumer")
+registerClientTask("runNektoBrowser", "me.markerra.rtcbridge.browser.NektoBrowserApp")
+
+tasks.register<JavaExec>("installChromium") {
+    group = "application"
+    description = "Downloads the Chromium version required by Playwright."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass = "com.microsoft.playwright.CLI"
+    args("install", "chromium")
+}
 
 tasks.test {
     useJUnitPlatform()
