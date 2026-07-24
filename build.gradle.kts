@@ -1,5 +1,6 @@
 plugins {
     id("java")
+    application
 }
 
 group = "me.markerra"
@@ -10,9 +11,22 @@ repositories {
 }
 
 dependencies {
+    implementation("com.google.code.gson:gson:2.13.2")
+    implementation("org.java-websocket:Java-WebSocket:1.6.0")
+
     testImplementation(platform("org.junit:junit-bom:6.0.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+application {
+    mainClass = "me.markerra.rtcbridge.Main"
 }
 
 tasks.test {
