@@ -29,6 +29,19 @@ application {
     mainClass = "me.markerra.rtcbridge.Main"
 }
 
+fun registerClientTask(name: String, mainClassName: String) {
+    tasks.register<JavaExec>(name) {
+        group = "application"
+        description = "Runs $name for the local PCM bridge test."
+        classpath = sourceSets["main"].runtimeClasspath
+        mainClass = mainClassName
+        standardInput = System.`in`
+    }
+}
+
+registerClientTask("runTestSource", "me.markerra.rtcbridge.testclient.PcmTestSource")
+registerClientTask("runTestConsumer", "me.markerra.rtcbridge.testclient.PcmTestConsumer")
+
 tasks.test {
     useJUnitPlatform()
 }
