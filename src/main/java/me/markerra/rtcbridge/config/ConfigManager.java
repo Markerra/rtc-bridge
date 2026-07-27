@@ -48,7 +48,7 @@ public final class ConfigManager {
                     config = new AppConfig(null, null, null);
                 }
 
-                System.out.println("config is loaded: " + config);
+                System.out.println("Config is loaded.");
             } catch (JsonSyntaxException e) {
                 System.out.println("Failed to load config: config.json contains invalid syntax");
             }

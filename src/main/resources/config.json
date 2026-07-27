@@ -20,8 +20,9 @@
     "headless": false,
     "manualMode": true,
     "muteOutput": true,
-    "fakeStream": true,
     "debugMode": false,
+    "fakeStreamInput": false,
+    "fakeStreamOutput": true,
     "defaultURL": "https://nekto.me/audiochat",
     "profileDirectory": "data/nekto-profile"
   }

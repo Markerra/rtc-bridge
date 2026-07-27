@@ -30,7 +30,7 @@ abstract class BridgeTestClient extends WebSocketClient {
 
     @Override
     public final void onMessage(String text) {
-        System.out.printf("Server [%s]: %s%n", getURI().getPath(), text);
+        //System.out.printf("Server [%s]: %s%n", getURI().getPath(), text);
         JsonObject message = GSON.fromJson(text, JsonObject.class);
         if (message != null && message.has("type") && "state".equals(message.get("type").getAsString())
                 && message.has("state") && "ready".equals(message.get("state").getAsString())) {

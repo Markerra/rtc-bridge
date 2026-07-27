@@ -19,7 +19,7 @@ public final class BrowserBindings {
     private final AppConfig config;
 
     private static final String STATE_SCRIPT = ResourceManager.loadResource("state-bridge.js");
-    private static final String PCM_SCRIPT = ResourceManager.loadResource("pcm-bridge.js");
+    private static final String OUTPUT_SCRIPT = ResourceManager.loadResource("pcm-bridge.js");
     private static final String INPUT_SCRIPT = ResourceManager.loadResource("browser-input.js");
 
     public BrowserBindings(PlaywrightBrowserSession session, AppConfig config) {
@@ -37,9 +37,12 @@ public final class BrowserBindings {
 
         page.addInitScript(STATE_SCRIPT);
 
-        if (config.browser().fakeStream()) {
-            page.addInitScript(PCM_SCRIPT);
+        if (config.browser().fakeStreamInput()) {
             page.addInitScript(INPUT_SCRIPT);
+        }
+
+        if (config.browser().fakeStreamOutput()) {
+            page.addInitScript(OUTPUT_SCRIPT);
         }
     }
 

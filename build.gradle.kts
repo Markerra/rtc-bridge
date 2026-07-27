@@ -14,6 +14,7 @@ dependencies {
     implementation("com.google.code.gson:gson:2.13.2")
     implementation("com.microsoft.playwright:playwright:1.60.0")
     implementation("org.java-websocket:Java-WebSocket:1.6.0")
+    implementation("org.slf4j:slf4j-simple:2.0.13")
 
     testImplementation(platform("org.junit:junit-bom:6.0.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
