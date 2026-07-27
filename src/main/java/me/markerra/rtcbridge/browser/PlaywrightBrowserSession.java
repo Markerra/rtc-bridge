@@ -1,6 +1,5 @@
 package me.markerra.rtcbridge.browser;
-import com.google.gson.Gson;
-import me.markerra.rtcbridge.util.ResourceManager;
+import me.markerra.rtcbridge.config.AppConfig;
 import me.markerra.rtcbridge.util.ResourceManager.*;
 
 import com.microsoft.playwright.*;
@@ -12,8 +11,6 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 
 /**
  * One visible, persistent browser session.
@@ -23,12 +20,11 @@ import java.time.format.DateTimeFormatter;
  * not bypassed by the program.
  */
 public final class PlaywrightBrowserSession implements AutoCloseable {
-    private static final String STATE_BRIDGE_SCRIPT = ResourceManager.loadResource("state-bridge.js");
-    private static final String PCM_BRIDGE_SCRIPT = ResourceManager.loadResource("pcm-bridge.js");
-
     private final Path profileDirectory;
     private final AtomicReference<BrowserState> state =
             new AtomicReference<>(BrowserState.STARTING);
+
+    private final AppConfig config;
 
     private Playwright playwright;
     private BrowserContext context;
@@ -37,8 +33,9 @@ public final class PlaywrightBrowserSession implements AutoCloseable {
     private final List<Consumer<BrowserState>> listeners =
             new CopyOnWriteArrayList<>();
 
-    public PlaywrightBrowserSession(Path profileDirectory) {
+    public PlaywrightBrowserSession(Path profileDirectory, AppConfig config) {
         this.profileDirectory = profileDirectory;
+        this.config = config;
     }
 
     public void open(String targetUrl) throws IOException {
@@ -48,7 +45,7 @@ public final class PlaywrightBrowserSession implements AutoCloseable {
         context = playwright.chromium().launchPersistentContext(
             profileDirectory,
             new BrowserType.LaunchPersistentContextOptions()
-                .setHeadless(false)
+                .setHeadless(config.browser().headlessMode())
                 .setArgs(List.of(
                     "--allow-running-insecure-content",
                     "--disable-web-security",
@@ -59,8 +56,8 @@ public final class PlaywrightBrowserSession implements AutoCloseable {
 
         page = context.pages().isEmpty() ? context.newPage() : context.pages().getFirst();
 
-        BrowserBindings bindings = new BrowserBindings(this, null);
-        bindings.register(page, STATE_BRIDGE_SCRIPT, PCM_BRIDGE_SCRIPT);
+        BrowserBindings bindings = new BrowserBindings(this, config);
+        bindings.register(page);
 
         context.onClose(ctx -> changeState(BrowserState.CLOSED));
 
@@ -103,10 +100,7 @@ public final class PlaywrightBrowserSession implements AutoCloseable {
     }
 
     public void toggleManualMode(boolean manual) {
-        BrowserState newState = state.get() == BrowserState.MANUAL_MODE
-                ? BrowserState.PAGE_READY : BrowserState.MANUAL_MODE;
-
-        state.set(newState);
+        if (manual) state.set(BrowserState.MANUAL_MODE);
     }
 
     public void onStateChanged(Consumer<BrowserState> listener) {

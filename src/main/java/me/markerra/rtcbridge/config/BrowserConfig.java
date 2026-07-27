@@ -4,6 +4,7 @@ public record BrowserConfig(
         boolean headlessMode,
         boolean manualMode,
         boolean muteOutput,
+        boolean fakeStream,
         boolean debugMode,
         String defaultURL,
         String profileDirectory
@@ -12,12 +13,14 @@ public record BrowserConfig(
             boolean headlessMode,
             boolean manualMode,
             boolean muteOutput,
+            boolean fakeStream,
             boolean debugMode,
             String defaultURL,
             String profileDirectory) {
         this.headlessMode = headlessMode;
         this.manualMode = manualMode;
         this.muteOutput = muteOutput;
+        this.fakeStream = fakeStream;
         this.debugMode = debugMode;
         this.defaultURL = defaultURL;
         this.profileDirectory = profileDirectory;

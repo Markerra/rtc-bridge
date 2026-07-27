@@ -3,6 +3,9 @@
     if (window.__browserInputLoaded)
         return;
 
+    if (window.top !== window)
+        return;
+
     window.__browserInputLoaded = true;
 
 
@@ -177,29 +180,39 @@
     const pcmQueue = [];
 
 
-
-    function pushPCM(buffer) {
-
+    function pushPCM(buffer){
 
         const samples =
-            new Int16Array(
-                buffer
+            new Int16Array(buffer);
+
+
+        const float =
+            new Float32Array(
+                samples.length
             );
 
 
-        for(let i = 0; i < samples.length; i++) {
+        for(
+            let i=0;
+            i<samples.length;
+            i++
+        ){
 
-
-            pcmQueue.push(
-                samples[i] / 32768
-            );
-
+            float[i] =
+                samples[i] / 32768;
 
         }
 
 
-    }
+        if(window.pcmProcessor)
 
+            window.pcmProcessor
+                .port
+                .postMessage(
+                    float
+                );
+
+    }
 
 
 
@@ -207,55 +220,111 @@
     // Fake microphone
     // ==========================
 
+    const WORKLET_CODE = `
 
-    let audioContext;
+        class PCMInputProcessor extends AudioWorkletProcessor {
+        
+        constructor(){
+        
+        super();
+        
+        this.queue=[];
+        
+        this.port.onmessage=e=>{
+        
+        for(const s of e.data)
+        this.queue.push(s);
+        
+        };
+        
+        }
+        
+        
+        process(inputs,outputs){
+        
+        const ch=outputs[0][0];
+        
+        for(let i=0;i<ch.length;i++){
+        
+        ch[i]=
+        this.queue.length
+        ?
+        this.queue.shift()
+        :
+        0;
+        
+        }
+        
+        return true;
+        
+        }
+        
+        }
+        
+        registerProcessor(
+        "pcm-input",
+        PCMInputProcessor
+        );
+        
+        `;
 
-    let destination;
+    let fakeStream = null;
+
+    let audioContext = null;
+
+    let destination = null;
+
+    let processor = null;
 
 
 
-    function createFakeMicrophone() {
+    async function createFakeMicrophone() {
+
+
+        if(fakeStream) {
+
+            log(
+                "INFO",
+                "Using existing fake stream"
+            );
+
+            return fakeStream;
+
+        }
 
 
         audioContext =
             new AudioContext({
-
-                sampleRate
-
+                sampleRate:48000
             });
 
+
+
+        await audioContext.resume();
+
+
+
+        destination =
+            audioContext
+                .createMediaStreamDestination();
+
+
+
+        /*
+          Временно тестовый звук.
+          Потом сюда подключим AudioWorklet.
+        */
 
 
         const oscillator =
             audioContext.createOscillator();
 
 
-        /*
-          временно для проверки.
-          Когда PCM пойдет из WebSocket,
-          этот блок можно удалить.
-        */
-
-
-        destination =
-            audioContext.createMediaStreamDestination();
-
-
-
-        const gain =
-            audioContext.createGain();
-
-
-        gain.gain.value = 0;
-
+        oscillator.frequency.value =
+            440;
 
 
         oscillator.connect(
-            gain
-        );
-
-
-        gain.connect(
             destination
         );
 
@@ -264,7 +333,17 @@
 
 
 
-        return destination.stream;
+        fakeStream =
+            destination.stream;
+
+
+        log(
+            "INFO",
+            "Fake microphone created"
+        );
+
+
+        return fakeStream;
 
     }
 
@@ -282,44 +361,66 @@
         );
 
 
-
     navigator.mediaDevices.getUserMedia =
         async function(constraints) {
 
+            const stream =
+                await originalGetUserMedia(
+                    constraints
+                );
+
+
+            log(
+                "INFO",
+                "Original microphone granted"
+            );
+
 
             if(
-                constraints
-                &&
+                constraints &&
                 constraints.audio
             ) {
+
+                const fake =
+                    await createFakeMicrophone();
+
+
+                const fakeTrack =
+                    fake.getAudioTracks()[0];
+
+
+                const oldTrack =
+                    stream.getAudioTracks()[0];
+
+
+                if(oldTrack) {
+
+                    stream.removeTrack(
+                        oldTrack
+                    );
+
+
+                    oldTrack.stop();
+
+                }
+
+
+                stream.addTrack(
+                    fakeTrack
+                );
 
 
                 log(
                     "INFO",
-                    "Providing fake microphone"
+                    "Microphone track replaced"
                 );
-
-
-                if(!destination)
-
-                    createFakeMicrophone();
-
-
-
-                return destination.stream;
-
 
             }
 
 
-
-            return originalGetUserMedia(
-                constraints
-            );
-
+            return stream;
 
         };
-
 
 
     log(

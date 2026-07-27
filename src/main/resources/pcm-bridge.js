@@ -3,6 +3,9 @@
     if (window.__pcmBridgeLoaded)
         return;
 
+    if (window.top !== window)
+        return;
+
     window.__pcmBridgeLoaded = true;
 
 

@@ -4,7 +4,6 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import me.markerra.rtcbridge.audio.AudioFormat;
-import me.markerra.rtcbridge.config.ConfigManager;
 import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.WebSocketServer;
@@ -22,19 +21,32 @@ public final class LocalBridgeServer extends WebSocketServer {
     private static final Gson GSON = new Gson();
     private static AudioFormat audioFormat;
 
-    private final Map<WebSocket, ClientRole> clients = new ConcurrentHashMap<>();
+    // record-helper for storing client state
+    public record ClientSession(ClientRole role, ClientChannel channel) {}
 
-    public LocalBridgeServer(String url, int port, AudioFormat format) {
-        // Binding explicitly to loopback prevents other devices on the network from connecting.
-        super(new InetSocketAddress(url, port));
+    private final Map<WebSocket, ClientSession> clients = new ConcurrentHashMap<>();
+
+    public LocalBridgeServer(String host, int port, AudioFormat format) {
+        super(new InetSocketAddress(host, port));
         audioFormat = format;
     }
 
     @Override
     public void onOpen(WebSocket connection, ClientHandshake handshake) {
-        clients.put(connection, ClientRole.UNKNOWN);
+        // extract connection endpoint, e.g. "/browser" or "/game"
+        String resourceDescriptor = handshake.getResourceDescriptor();
+        ClientChannel channel = parseChannel(resourceDescriptor);
+
+        if (channel == null) {
+            reject(connection, "Invalid endpoint. Connect to /game or /browser.");
+            connection.close();
+            return;
+        }
+
+        // register client with unknown role on the specific channel
+        clients.put(connection, new ClientSession(ClientRole.UNKNOWN, channel));
         sendJson(connection, stateMessage("connected"));
-        System.out.printf("Client connected: %s%n", connection.getRemoteSocketAddress());
+        System.out.printf("Client connected to [%s]: %s%n", channel, connection.getRemoteSocketAddress());
     }
 
     @Override
@@ -46,16 +58,22 @@ public final class LocalBridgeServer extends WebSocketServer {
                 return;
             }
 
-            String role = message.has("role") ? message.get("role").getAsString() : "";
-            if ("source".equals(role)) {
-                clients.put(connection, ClientRole.SOURCE);
-            } else if ("consumer".equals(role)) {
-                clients.put(connection, ClientRole.CONSUMER);
+            ClientSession currentSession = clients.get(connection);
+            if (currentSession == null) return;
+
+            String roleStr = message.has("role") ? message.get("role").getAsString() : "";
+            ClientRole newRole;
+            if ("source".equals(roleStr)) {
+                newRole = ClientRole.SOURCE;
+            } else if ("consumer".equals(roleStr)) {
+                newRole = ClientRole.CONSUMER;
             } else {
                 reject(connection, "Role must be source or consumer.");
                 return;
             }
 
+            // update the session and set new role
+            clients.put(connection, new ClientSession(newRole, currentSession.channel()));
             sendJson(connection, stateMessage("ready"));
         } catch (JsonParseException | IllegalStateException exception) {
             reject(connection, "Malformed JSON hello message.");
@@ -64,7 +82,8 @@ public final class LocalBridgeServer extends WebSocketServer {
 
     @Override
     public void onMessage(WebSocket connection, ByteBuffer frame) {
-        if (clients.getOrDefault(connection, ClientRole.UNKNOWN) != ClientRole.SOURCE) {
+        ClientSession senderSession = clients.get(connection);
+        if (senderSession == null || senderSession.role() != ClientRole.SOURCE) {
             reject(connection, "Only a source may send binary audio.");
             return;
         }
@@ -74,13 +93,16 @@ public final class LocalBridgeServer extends WebSocketServer {
             return;
         }
 
-        // Copy before broadcasting: ByteBuffer position is mutable and belongs to the library callback.
         byte[] pcm = new byte[frame.remaining()];
         frame.get(pcm);
 
-        // Send current frame to all consumers
-        clients.forEach((client, role) -> {
-            if (role == ClientRole.CONSUMER && client.isOpen()) {
+        ClientChannel targetChannel = senderSession.channel();
+
+        // send to all consumer in the same channel
+        clients.forEach((client, session) -> {
+            if (session.role() == ClientRole.CONSUMER
+                    && session.channel() == targetChannel
+                    && client.isOpen()) {
                 client.send(pcm);
             }
         });
@@ -101,6 +123,13 @@ public final class LocalBridgeServer extends WebSocketServer {
     @Override
     public void onStart() {
         setConnectionLostTimeout(30);
+    }
+
+    private ClientChannel parseChannel(String path) {
+        if (path == null) return null;
+        if (path.startsWith("/game")) return ClientChannel.GAME;
+        if (path.startsWith("/browser")) return ClientChannel.BROWSER;
+        return null;
     }
 
     private static JsonObject stateMessage(String state) {

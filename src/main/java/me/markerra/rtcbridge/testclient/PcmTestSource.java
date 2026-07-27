@@ -19,7 +19,10 @@ public final class PcmTestSource {
     public static void main(String[] args) throws Exception {
         ConfigManager.load();
 
-        String url = "ws://" + ConfigManager.bridge().host() + ":" + ConfigManager.bridge().port();
+        String url = "ws://"
+                + ConfigManager.bridge().host() + ":"
+                + ConfigManager.bridge().port()
+                + ConfigManager.bridge().gameEndpoint();
         URI serverUri = URI.create(url);
 
         var client = new BridgeTestClient(serverUri, "source") {

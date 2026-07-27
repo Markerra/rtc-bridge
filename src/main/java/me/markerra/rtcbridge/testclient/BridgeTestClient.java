@@ -30,7 +30,7 @@ abstract class BridgeTestClient extends WebSocketClient {
 
     @Override
     public final void onMessage(String text) {
-        System.out.printf("Server: %s%n", text);
+        System.out.printf("Server [%s]: %s%n", getURI().getPath(), text);
         JsonObject message = GSON.fromJson(text, JsonObject.class);
         if (message != null && message.has("type") && "state".equals(message.get("type").getAsString())
                 && message.has("state") && "ready".equals(message.get("state").getAsString())) {
@@ -40,18 +40,17 @@ abstract class BridgeTestClient extends WebSocketClient {
 
     @Override
     public final void onMessage(ByteBuffer bytes) {
-        //System.out.println("Server received binary frame: " + bytes.remaining());
         onPcmFrame(bytes);
     }
 
     @Override
     public void onClose(int code, String reason, boolean remote) {
-        System.out.printf("Disconnected: code=%d, reason=%s%n", code, reason);
+        System.out.printf("Disconnected [%s]: code=%d, reason=%s%n", getURI().getPath(), code, reason);
     }
 
     @Override
     public void onError(Exception exception) {
-        System.err.println("WebSocket error: " + exception.getMessage());
+        System.err.println("WebSocket error [" + getURI().getPath() + "]: " + exception.getMessage());
     }
 
     public boolean awaitReady() throws InterruptedException {

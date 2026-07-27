@@ -20,7 +20,7 @@ public final class NektoBrowserApp {
         String profileDirectory = ConfigManager.browser().profileDirectory();
         Path profilePath = Path.of(profileDirectory);
 
-        try (var session = new PlaywrightBrowserSession(profilePath)) {
+        try (var session = new PlaywrightBrowserSession(profilePath, ConfigManager.get())) {
             Runtime.getRuntime().addShutdownHook(new Thread(session::close, "browser-shutdown"));
 
             session.toggleManualMode(manualMode);

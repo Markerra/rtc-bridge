@@ -21,7 +21,7 @@ public final class PcmTestConsumer {
         String url = "ws://"
                 + ConfigManager.bridge().host() + ":"
                 + ConfigManager.bridge().port()
-                + ConfigManager.bridge().browser();
+                + ConfigManager.bridge().browserEndpoint();
         URI serverUri = URI.create(url);
 
         AtomicLong frames = new AtomicLong();

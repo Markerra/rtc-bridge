@@ -10,6 +10,7 @@ public record AppConfig(BridgeConfig bridge, AudioConfig audio, BrowserConfig br
                 false,
                 false,
                 false,
+                false,
                 null,
                 null);
     }

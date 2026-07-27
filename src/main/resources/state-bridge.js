@@ -1,6 +1,6 @@
 (() => {
-    // Выполняем ТОЛЬКО в главном окне
-    if (window !== window.top) return;
+    if (window.top !== window)
+        return;
 
     const visible = (element) => {
         try {

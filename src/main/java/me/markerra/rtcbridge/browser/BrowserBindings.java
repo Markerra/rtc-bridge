@@ -1,9 +1,10 @@
 package me.markerra.rtcbridge.browser;
 
+import me.markerra.rtcbridge.config.AppConfig;
+import me.markerra.rtcbridge.util.ResourceManager;
+
 import com.google.gson.Gson;
 import com.microsoft.playwright.Page;
-import me.markerra.rtcbridge.config.AppConfig;
-import me.markerra.rtcbridge.config.ConfigManager;
 
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -11,33 +12,35 @@ import java.time.format.DateTimeFormatter;
 public final class BrowserBindings {
 
     private static final DateTimeFormatter TIME_FORMAT =
-            DateTimeFormatter.ofPattern("mm:ss:SSS");
+            DateTimeFormatter.ofPattern("mm:ss.SSS");
 
     private final PlaywrightBrowserSession session;
     private final Gson gson;
     private final AppConfig config;
 
-    public BrowserBindings(PlaywrightBrowserSession session, Gson gson) {
+    private static final String STATE_SCRIPT = ResourceManager.loadResource("state-bridge.js");
+    private static final String PCM_SCRIPT = ResourceManager.loadResource("pcm-bridge.js");
+    private static final String INPUT_SCRIPT = ResourceManager.loadResource("browser-input.js");
+
+    public BrowserBindings(PlaywrightBrowserSession session, AppConfig config) {
         this.session = session;
-
-        if (gson == null) this.gson = new Gson();
-        else this.gson = gson;
-
-        config = ConfigManager.get();
+        this.config = config;
+        this.gson = new Gson();
     }
 
-    public void register(Page page, String stateScript, String pcmScript) {
+    public void register(Page page) {
+        page.addInitScript("window.__bridgeConfig = %s;".formatted(gson.toJson(config)));
+        page.addInitScript("sessionStorage.removeItem('__rtc_bridge_state');");
+
         registerStateBinding(page);
         registerLogBinding(page);
 
-        page.addInitScript("""
-                window.__bridgeConfig = %s;
-                """.formatted(gson.toJson(config)));
+        page.addInitScript(STATE_SCRIPT);
 
-        page.addInitScript("sessionStorage.removeItem('__rtc_bridge_state');");
-
-        page.addInitScript(stateScript);
-        page.addInitScript(pcmScript);
+        if (config.browser().fakeStream()) {
+            page.addInitScript(PCM_SCRIPT);
+            page.addInitScript(INPUT_SCRIPT);
+        }
     }
 
     private void registerStateBinding(Page page) {
