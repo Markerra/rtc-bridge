@@ -1,14 +1,19 @@
 package me.markerra.rtcbridge.browser;
+import com.google.gson.Gson;
+import me.markerra.rtcbridge.util.ResourceManager;
+import me.markerra.rtcbridge.util.ResourceManager.*;
 
-import com.microsoft.playwright.BrowserContext;
-import com.microsoft.playwright.BrowserType;
-import com.microsoft.playwright.Page;
-import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.*;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.CountDownLatch;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 
 /**
  * One visible, persistent browser session.
@@ -18,12 +23,19 @@ import java.util.concurrent.CountDownLatch;
  * not bypassed by the program.
  */
 public final class PlaywrightBrowserSession implements AutoCloseable {
+    private static final String STATE_BRIDGE_SCRIPT = ResourceManager.loadResource("state-bridge.js");
+    private static final String PCM_BRIDGE_SCRIPT = ResourceManager.loadResource("pcm-bridge.js");
+
     private final Path profileDirectory;
-    private final CountDownLatch pageClosed = new CountDownLatch(1);
+    private final AtomicReference<BrowserState> state =
+            new AtomicReference<>(BrowserState.STARTING);
 
     private Playwright playwright;
     private BrowserContext context;
     private Page page;
+
+    private final List<Consumer<BrowserState>> listeners =
+            new CopyOnWriteArrayList<>();
 
     public PlaywrightBrowserSession(Path profileDirectory) {
         this.profileDirectory = profileDirectory;
@@ -32,33 +44,88 @@ public final class PlaywrightBrowserSession implements AutoCloseable {
     public void open(String targetUrl) throws IOException {
         Files.createDirectories(profileDirectory);
         playwright = Playwright.create();
+
         context = playwright.chromium().launchPersistentContext(
-                profileDirectory,
-                new BrowserType.LaunchPersistentContextOptions().setHeadless(false)
+            profileDirectory,
+            new BrowserType.LaunchPersistentContextOptions()
+                .setHeadless(false)
+                .setArgs(List.of(
+                    "--allow-running-insecure-content",
+                    "--disable-web-security",
+                    "--disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights",
+                    "--enable-features=LocalNetworkAccess"
+                ))
         );
+
         page = context.pages().isEmpty() ? context.newPage() : context.pages().getFirst();
-        page.onLoad(loadedPage -> System.out.printf("Page loaded: %s%n", loadedPage.url()));
-        page.onClose(closedPage -> pageClosed.countDown());
+
+        BrowserBindings bindings = new BrowserBindings(this, null);
+        bindings.register(page, STATE_BRIDGE_SCRIPT, PCM_BRIDGE_SCRIPT);
+
+        context.onClose(ctx -> changeState(BrowserState.CLOSED));
 
         System.out.printf("Opening %s%n", targetUrl);
+        changeState(BrowserState.PAGE_LOADING);
         page.navigate(targetUrl);
     }
 
-    /** Blocks until the user closes the only browser tab/window or Ctrl+C stops the process. */
-    public void awaitClose() throws InterruptedException {
-        pageClosed.await();
+
+    public void awaitClose() {
+        while (state.get() != BrowserState.CLOSED) {
+            page.waitForTimeout(100);
+        }
     }
 
     @Override
     public void close() {
-        pageClosed.countDown();
+        changeState(BrowserState.CLOSED);
+
         if (context != null) {
             context.close();
             context = null;
         }
+
         if (playwright != null) {
             playwright.close();
             playwright = null;
+        }
+    }
+
+    public void searchNext() {
+        // TODO: add search params
+        Locator searchButton = page.locator("#searchCompanyBtn, .callScreen__findBtn");
+
+        try {
+            searchButton.click();
+        } catch (com.microsoft.playwright.TimeoutError e) {
+
+        }
+    }
+
+    public void toggleManualMode(boolean manual) {
+        BrowserState newState = state.get() == BrowserState.MANUAL_MODE
+                ? BrowserState.PAGE_READY : BrowserState.MANUAL_MODE;
+
+        state.set(newState);
+    }
+
+    public void onStateChanged(Consumer<BrowserState> listener) {
+        listeners.add(listener);
+    }
+
+    void changeState(BrowserState nextState) {
+        if (state.get() == BrowserState.MANUAL_MODE) return;
+
+        BrowserState previousState = state.getAndSet(nextState);
+        if (previousState != nextState) {
+            System.out.printf("Browser state: %s -> %s%n", previousState, nextState);
+            listeners.forEach(listener -> {
+                try {
+                    listener.accept(nextState);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
         }
     }
 }

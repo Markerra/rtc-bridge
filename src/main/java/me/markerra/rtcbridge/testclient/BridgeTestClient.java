@@ -40,6 +40,7 @@ abstract class BridgeTestClient extends WebSocketClient {
 
     @Override
     public final void onMessage(ByteBuffer bytes) {
+        //System.out.println("Server received binary frame: " + bytes.remaining());
         onPcmFrame(bytes);
     }
 

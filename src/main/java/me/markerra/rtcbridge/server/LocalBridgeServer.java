@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import me.markerra.rtcbridge.audio.AudioFormat;
+import me.markerra.rtcbridge.config.ConfigManager;
 import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.WebSocketServer;
@@ -19,13 +20,14 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class LocalBridgeServer extends WebSocketServer {
     private static final Gson GSON = new Gson();
-    private static final AudioFormat FORMAT = AudioFormat.VOICE_CHAT;
+    private static AudioFormat audioFormat;
 
     private final Map<WebSocket, ClientRole> clients = new ConcurrentHashMap<>();
 
-    public LocalBridgeServer(int port) {
+    public LocalBridgeServer(String url, int port, AudioFormat format) {
         // Binding explicitly to loopback prevents other devices on the network from connecting.
-        super(new InetSocketAddress("127.0.0.1", port));
+        super(new InetSocketAddress(url, port));
+        audioFormat = format;
     }
 
     @Override
@@ -66,9 +68,9 @@ public final class LocalBridgeServer extends WebSocketServer {
             reject(connection, "Only a source may send binary audio.");
             return;
         }
-        if (frame.remaining() != FORMAT.expectedFrameBytes()) {
+        if (frame.remaining() != audioFormat.expectedFrameBytes()) {
             reject(connection, "Expected %d bytes per PCM frame, got %d."
-                    .formatted(FORMAT.expectedFrameBytes(), frame.remaining()));
+                    .formatted(audioFormat.expectedFrameBytes(), frame.remaining()));
             return;
         }
 
@@ -105,10 +107,10 @@ public final class LocalBridgeServer extends WebSocketServer {
         JsonObject message = new JsonObject();
         message.addProperty("type", "state");
         message.addProperty("state", state);
-        message.addProperty("sampleRate", FORMAT.sampleRate());
-        message.addProperty("channels", FORMAT.channels());
-        message.addProperty("bitsPerSample", FORMAT.bitsPerSample());
-        message.addProperty("frameDurationMs", FORMAT.frameDurationMs());
+        message.addProperty("sampleRate", audioFormat.sampleRate());
+        message.addProperty("channels", audioFormat.channels());
+        message.addProperty("bitsPerSample", audioFormat.bitsPerSample());
+        message.addProperty("frameDurationMs", audioFormat.frameDurationMs());
         return message;
     }
 

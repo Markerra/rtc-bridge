@@ -2,6 +2,7 @@ package me.markerra.rtcbridge.testclient;
 
 import me.markerra.rtcbridge.audio.AudioFormat;
 import me.markerra.rtcbridge.audio.PcmSineGenerator;
+import me.markerra.rtcbridge.config.ConfigManager;
 
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -11,13 +12,16 @@ import java.util.concurrent.TimeUnit;
 
 /** Sends 440 Hz test audio: 50 PCM frames of 1,920 bytes every second. */
 public final class PcmTestSource {
-    private static final URI DEFAULT_SERVER = URI.create("ws://127.0.0.1:25565");
 
     private PcmTestSource() {
     }
 
     public static void main(String[] args) throws Exception {
-        URI serverUri = args.length == 0 ? DEFAULT_SERVER : URI.create(args[0]);
+        ConfigManager.load();
+
+        String url = "ws://" + ConfigManager.bridge().host() + ":" + ConfigManager.bridge().port();
+        URI serverUri = URI.create(url);
+
         var client = new BridgeTestClient(serverUri, "source") {
             @Override
             protected void onPcmFrame(ByteBuffer bytes) {
