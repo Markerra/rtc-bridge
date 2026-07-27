@@ -1,0 +1,27 @@
+{
+  "bridge": {
+    "host": "127.0.0.1",
+    "port": 25565,
+    "browserEndpoint" : "/browser",
+    "gameEndpoint": "/game"
+  },
+
+  "audio": {
+    "volume": 0.8,
+    "format": {
+      "sampleRate": 48000,
+      "channels": 1,
+      "bitsPerSample": 16,
+      "frameDurationMs": 20
+    }
+  },
+
+  "browser": {
+    "headless": false,
+    "manualMode": true,
+    "muteOutput": true,
+    "debugMode": false,
+    "defaultURL": "https://nekto.me/audiochat",
+    "profileDirectory": "data/nekto-profile"
+  }
+}
