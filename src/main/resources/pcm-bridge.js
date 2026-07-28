@@ -1,17 +1,13 @@
 (() => {
     if (window.__pcmBridgeLoaded) return;
-
     if (window.top !== window) return;
-
     window.__pcmBridgeLoaded = true;
 
     // ==========================
     // Logging
     // ==========================
-
     function log(level, message) {
         const text = `[PCM] ${message}`;
-
         if (window.bridgeLog) {
             window.bridgeLog(level, text);
         } else {
@@ -22,276 +18,226 @@
     // ==========================
     // Config
     // ==========================
-
     const config = window.__bridgeConfig;
-
     if (!config) {
         log("ERROR", "Missing __bridgeConfig");
-
         return;
     }
 
-    const MUTE_OUTPUT = config.browser.muteOutput ?? true;
-
     const AUDIO = config.audio.format;
+    const FRAME_SAMPLES = (AUDIO.sampleRate * AUDIO.frameDurationMs) / 1000; // 960 для 20мс при 48kHz
 
-    const FRAME_SAMPLES = (AUDIO.sampleRate * AUDIO.frameDurationMs) / 1000;
-
-    log(
-        "DEBUG",
-        `Audio format ${AUDIO.sampleRate}Hz ${AUDIO.channels}ch ${AUDIO.bitsPerSample}bit`,
-    );
+    log("DEBUG", `Audio format ${AUDIO.sampleRate}Hz ${AUDIO.channels}ch ${AUDIO.bitsPerSample}bit. Using AudioWorklet!`);
 
     // ==========================
     // WebSocket
     // ==========================
-
     class BridgeSocket {
         constructor(url) {
             this.url = url;
-
             this.socket = null;
-
             this.ready = false;
-
             this.connect();
         }
 
         connect() {
             log("DEBUG", `Connecting ${this.url}`);
-
             this.socket = new WebSocket(this.url);
-
             this.socket.binaryType = "arraybuffer";
 
             this.socket.onopen = () => {
                 log("INFO", "WebSocket connected");
-
-                this.socket.send(
-                    JSON.stringify({
-                        type: "hello",
-
-                        role: "source",
-                    }),
-                );
+                this.socket.send(JSON.stringify({ type: "hello", role: "source" }));
             };
 
             this.socket.onmessage = (event) => {
                 try {
                     const msg = JSON.parse(event.data);
-
                     if (msg.type === "state" && msg.state === "ready") {
                         this.ready = true;
-
                         log("INFO", "Bridge ready");
                     }
                 } catch {}
             };
 
-            this.socket.onerror = () => {
-                log("ERROR", "WebSocket error");
-            };
-
+            this.socket.onerror = () => log("ERROR", "WebSocket error");
             this.socket.onclose = () => {
                 log("WARN", "WebSocket closed");
-
                 this.ready = false;
-
                 setTimeout(() => this.connect(), 2000);
             };
         }
 
         send(buffer) {
-            if (
-                !this.ready ||
-                !this.socket ||
-                this.socket.readyState !== WebSocket.OPEN
-            )
-                return;
-
+            if (!this.ready || !this.socket || this.socket.readyState !== WebSocket.OPEN) return;
             this.socket.send(buffer);
         }
     }
 
     const bridgeSocket = new BridgeSocket(
-        `ws://${config.bridge.host}:${config.bridge.port}${config.bridge.browserEndpoint}`,
+        `ws://${config.bridge.host}:${config.bridge.port}${config.bridge.browserEndpoint}`
     );
 
     // ==========================
-    // Ring Buffer
+    // Metrics & Logging
     // ==========================
-
-    class RingBuffer {
-        constructor(size) {
-            this.buffer = new Float32Array(size);
-
-            this.size = size;
-
-            this.read = 0;
-
-            this.write = 0;
-
-            this.length = 0;
-        }
-
-        push(data) {
-            for (let i = 0; i < data.length; i++) {
-                if (this.length >= this.size) {
-                    // overflow protection
-
-                    this.read = (this.read + 1) % this.size;
-
-                    this.length--;
-                }
-
-                this.buffer[this.write] = data[i];
-
-                this.write = (this.write + 1) % this.size;
-
-                this.length++;
-            }
-        }
-
-        available() {
-            return this.length;
-        }
-
-        pop(size) {
-            if (this.length < size) return null;
-
-            const result = new Float32Array(size);
-
-            for (let i = 0; i < size; i++) {
-                result[i] = this.buffer[this.read];
-
-                this.read = (this.read + 1) % this.size;
-
-                this.length--;
-            }
-
-            return result;
-        }
-    }
-
-    const pcmBuffer = new RingBuffer(FRAME_SAMPLES * 10);
-
     let framesSent = 0;
-
-    function sendFrames() {
-        while (pcmBuffer.available() >= FRAME_SAMPLES) {
-            const frame = pcmBuffer.pop(FRAME_SAMPLES);
-
-            const pcm = new Int16Array(FRAME_SAMPLES);
-
-            for (let i = 0; i < frame.length; i++) {
-                let sample = frame[i];
-
-                sample = Math.max(-1, Math.min(1, sample));
-
-                pcm[i] = sample < 0 ? sample * 32768 : sample * 32767;
-            }
-
-            bridgeSocket.send(pcm.buffer);
-
-            framesSent++;
-        }
-    }
+    let callbacks = 0;
+    let samplesReceived = 0;
 
     setInterval(() => {
-        if (framesSent > 0) {
-            log("DEBUG", `PCM frames sent: ${framesSent}`);
+        let state = window.__pcmContext ? window.__pcmContext.state : "unknown";
+        let trackState = window.__pcmTrack ? window.__pcmTrack.readyState : "none";
+        let trackMuted = window.__pcmTrack ? window.__pcmTrack.muted : false;
 
-            framesSent = 0;
-        }
+        log(
+            "DEBUG",
+            `worklet_blocks=${callbacks} ` +
+            `samples=${samplesReceived} ` +
+            `frames_sent=${framesSent} ` +
+            `ctx=${state} ` +
+            `track=${trackState} muted=${trackMuted}`
+        );
+
+        callbacks = 0;
+        samplesReceived = 0;
+        framesSent = 0;
     }, 1000);
 
     // ==========================
-    // Audio Capture
+    // AudioWorklet Generator (Blob)
     // ==========================
+    // Создаем код Worklet-процессора, который будет жить в изолированном аудио-потоке
+    const workletCode = `
+        class PcmProcessor extends AudioWorkletProcessor {
+            constructor() {
+                super();
+                this.targetSamples = ${FRAME_SAMPLES}; // 960 сэмплов (20мс)
+                this.buffer = new Float32Array(this.targetSamples);
+                this.offset = 0;
+            }
 
+            process(inputs, outputs, parameters) {
+                const input = inputs[0];
+                if (!input || !input[0]) return true;
+
+                const channelData = input[0]; // Моно-канал (128 сэмплов за квант времени)
+                let i = 0;
+
+                while (i < channelData.length) {
+                    const needed = this.targetSamples - this.offset;
+                    const available = channelData.length - i;
+                    const toCopy = Math.min(needed, available);
+
+                    this.buffer.set(channelData.subarray(i, i + toCopy), this.offset);
+                    this.offset += toCopy;
+                    i += toCopy;
+
+                    // Как только накопили ровно 20мс (960 сэмплов) — конвертируем и шлем на главный поток
+                    if (this.offset >= this.targetSamples) {
+                        const int16 = new Int16Array(this.targetSamples);
+                        for (let j = 0; j < this.targetSamples; j++) {
+                            let s = Math.max(-1, Math.min(1, this.buffer[j]));
+                            int16[j] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                        }
+                        
+                        // Отправляем готовый PCM-кадр (Transferable ArrayBuffer для нулевой задержки)
+                        this.port.postMessage(int16.buffer, [int16.buffer]);
+                        this.offset = 0;
+                    }
+                }
+                return true; // Держим процессор активным
+            }
+        }
+        registerProcessor('pcm-processor', PcmProcessor);
+    `;
+
+    // ==========================
+    // Audio Capture (Async AudioWorklet)
+    // ==========================
     const attachedStreams = new WeakSet();
 
-    function attachStream(stream) {
+    async function attachStream(stream) {
         if (!stream || attachedStreams.has(stream)) return;
-
         const tracks = stream.getAudioTracks();
-
         if (tracks.length === 0) return;
 
         attachedStreams.add(stream);
+        log("INFO", `Attach stream ${stream.id} using AudioWorklet`);
 
-        log("INFO", `Attach stream ${stream.id}`);
-
-        const context = new AudioContext({
+        const context = new (window.AudioContext || window.webkitAudioContext)({
             sampleRate: AUDIO.sampleRate,
         });
 
-        const source = context.createMediaStreamSource(stream);
+        window.__pcmContext = context;
+        window.__pcmTrack = tracks[0];
 
-        const processor = context.createScriptProcessor(2048, 1, 1);
+        try {
+            // 1. Создаем Blob URL для нашего Worklet-процессора и загружаем в аудио-движок
+            const blob = new Blob([workletCode], { type: "application/javascript" });
+            const workletUrl = URL.createObjectURL(blob);
+            await context.audioWorklet.addModule(workletUrl);
+            URL.revokeObjectURL(workletUrl); // Очищаем ссылку из памяти
 
-        /*
-                Важно:
+            // 2. Создаем узлы аудио-графа
+            const source = context.createMediaStreamSource(stream);
+            const workletNode = new AudioWorkletNode(context, "pcm-processor");
 
-                Мы не отправляем звук в колонки.
-                GainNode с нулевой громкостью
-                оставляет обработку активной,
-                но убирает локальное воспроизведение.
-            */
+            const mute = context.createGain();
+            mute.gain.value = 0.001;
 
-        const mute = context.createGain();
+            // ==========================================
+            // Oscillator Anchor
+            // ==========================================
+            const anchorOsc = context.createOscillator();
+            anchorOsc.frequency.value = 1; // Любая частота
+            anchorOsc.connect(mute);         // Пускаем в тот же тихий канал
+            anchorOsc.start();               // Запускаем вечный двигатель
+            // ==========================================
 
-        mute.gain.value = 0;
+            // 3. Соединяем граф: Источник -> Worklet -> Gain(тишина) -> Динамики
+            source.connect(workletNode);
+            workletNode.connect(mute);
+            mute.connect(context.destination);
 
-        source.connect(processor);
+            // 4. Принимаем готовые 16-битные кадры по 1920 байт напрямую из Worklet-потока
+            workletNode.port.onmessage = (event) => {
+                const pcmBuffer = event.data; // ArrayBuffer 1920 bytes
 
-        processor.connect(mute);
+                callbacks++;
+                samplesReceived += FRAME_SAMPLES;
 
-        mute.connect(context.destination);
+                bridgeSocket.send(pcmBuffer);
+                framesSent++;
+            };
 
-        processor.onaudioprocess = (event) => {
-            const samples = event.inputBuffer.getChannelData(0);
+            tracks[0].onended = () => {
+                log("INFO", "Audio track ended");
+                source.disconnect();
+                workletNode.disconnect();
+                mute.disconnect();
+                context.close();
+            };
 
-            pcmBuffer.push(samples);
-
-            sendFrames();
-        };
-
-        tracks[0].onended = () => {
-            log("INFO", "Audio track ended");
-
-            processor.disconnect();
-
-            source.disconnect();
-
-            mute.disconnect();
-
-            context.close();
-        };
+        } catch (e) {
+            log("ERROR", `Failed to initialize AudioWorklet: ${e.message}`);
+        }
     }
 
     // ==========================
     // Detect MediaStreams
     // ==========================
-
-    const descriptor = Object.getOwnPropertyDescriptor(
-        HTMLMediaElement.prototype,
-        "srcObject",
-    );
-
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "srcObject");
     if (descriptor) {
         Object.defineProperty(HTMLMediaElement.prototype, "srcObject", {
             get() {
                 return descriptor.get.call(this);
             },
-
             set(stream) {
                 descriptor.set.call(this, stream);
-
                 if (stream) {
-                    this.muted = true;
-                    this.volume = 0;
-
+                    this.muted = false;
+                    this.volume = 0.002;
                     attachStream(stream);
                 }
             },
@@ -309,5 +255,5 @@
         subtree: true,
     });
 
-    log("INFO", "PCM bridge initialized");
+    log("INFO", "PCM bridge initialized with AudioWorklet Engine");
 })();

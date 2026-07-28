@@ -49,8 +49,13 @@ public final class PlaywrightBrowserSession implements AutoCloseable {
                 .setArgs(List.of(
                     "--allow-running-insecure-content",
                     "--disable-web-security",
-                    "--disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights",
-                    "--enable-features=LocalNetworkAccess"
+                    "--disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,AudioServiceOutOfProcess,HighEfficiencyModeAvailable,BatterySaverModeAvailable",
+                    "--enable-features=LocalNetworkAccess",
+                    "--disable-background-timer-throttling",
+                    "--disable-renderer-backgrounding",
+                    "--disable-backgrounding-occluded-windows",
+                    "--disable-background-media-suspend",
+                    "--autoplay-policy=no-user-gesture-required"
                 ))
         );
 

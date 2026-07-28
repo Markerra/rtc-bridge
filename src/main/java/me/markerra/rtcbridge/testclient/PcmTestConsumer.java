@@ -50,8 +50,13 @@ public final class PcmTestConsumer {
 
         var reporter = Executors.newSingleThreadScheduledExecutor();
         reporter.scheduleAtFixedRate(() -> System.out.printf(
-                        "Received: frames=%d, bytes=%d, invalid=%d, dropped=%d (expected about 50 frames/sec)%n",
-                        frames.getAndSet(0), bytes.getAndSet(0), invalidFrames.getAndSet(0), player.getDroppedFrames()),
+                "Received: frames=%d, bytes=%d, invalid=%d, dropped=%d, underruns=%d%n",
+                frames.getAndSet(0),
+                bytes.getAndSet(0),
+                invalidFrames.getAndSet(0),
+                player.getDroppedFrames(),
+                player.getUnderruns()
+        ),
                 1, 1, TimeUnit.SECONDS);
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
