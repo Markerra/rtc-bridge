@@ -53,30 +53,50 @@ public final class LocalBridgeServer extends WebSocketServer {
     public void onMessage(WebSocket connection, String text) {
         try {
             JsonObject message = GSON.fromJson(text, JsonObject.class);
-            if (message == null || !message.has("type") || !"hello".equals(message.get("type").getAsString())) {
-                reject(connection, "Expected a hello message.");
-                return;
-            }
+            if (message == null) return;
 
             ClientSession currentSession = clients.get(connection);
             if (currentSession == null) return;
 
-            String roleStr = message.has("role") ? message.get("role").getAsString() : "";
-            ClientRole newRole;
-            if ("source".equals(roleStr)) {
-                newRole = ClientRole.SOURCE;
-            } else if ("consumer".equals(roleStr)) {
-                newRole = ClientRole.CONSUMER;
-            } else {
-                reject(connection, "Role must be source or consumer.");
+            // handshake
+            if (message.has("type") && "hello".equals(message.get("type").getAsString())) {
+                String roleStr = message.has("role") ? message.get("role").getAsString() : "";
+                ClientRole newRole;
+
+                if ("source".equals(roleStr)) {
+                    newRole = ClientRole.SOURCE;
+                } else if ("consumer".equals(roleStr)) {
+                    newRole = ClientRole.CONSUMER;
+                } else {
+                    reject(connection, "Role must be source or consumer.");
+                    return;
+                }
+
+                // update the session and set new role
+                clients.put(connection, new ClientSession(newRole, currentSession.channel()));
+                sendJson(connection, stateMessage("ready"));
                 return;
             }
 
-            // update the session and set new role
-            clients.put(connection, new ClientSession(newRole, currentSession.channel()));
-            sendJson(connection, stateMessage("ready"));
+            // actions
+            if (message.has("action")) {
+                if (currentSession.role() == ClientRole.UNKNOWN) {
+                    reject(connection, "You must send a hello message first.");
+                    return;
+                }
+
+                clients.forEach((client, session) -> {
+                    if (session.channel() == ClientChannel.BROWSER && client.isOpen()) {
+                        client.send(text);
+                    }
+                });
+                return;
+            }
+
+            reject(connection, "Unknown message format.");
+
         } catch (JsonParseException | IllegalStateException exception) {
-            reject(connection, "Malformed JSON hello message.");
+            reject(connection, "Malformed JSON message.");
         }
     }
 

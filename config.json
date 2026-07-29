@@ -3,7 +3,7 @@
     "host": "127.0.0.1",
     "port": 25565,
     "browserEndpoint" : "/browser",
-    "gameEndpoint": "/minecraft"
+    "gameEndpoint": "/game"
   },
 
   "audio": {
@@ -18,9 +18,10 @@
 
   "browser": {
     "headless": false,
-    "manualMode": true,
+    "manualMode": false,
     "muteOutput": true,
-    "debugMode": true,
+    "muteConnect": true,
+    "debugMode": false,
     "fakeStreamInput": false,
     "fakeStreamOutput": true,
     "defaultURL": "https://nekto.me/audiochat",

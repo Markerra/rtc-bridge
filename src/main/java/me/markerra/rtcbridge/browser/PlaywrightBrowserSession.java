@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -21,8 +22,12 @@ import java.util.function.Consumer;
  */
 public final class PlaywrightBrowserSession implements AutoCloseable {
     private final Path profileDirectory;
+
     private final AtomicReference<BrowserState> state =
             new AtomicReference<>(BrowserState.STARTING);
+
+    private final AtomicBoolean autoSearchEnabled =
+            new AtomicBoolean(false);
 
     private final AppConfig config;
 
@@ -93,19 +98,16 @@ public final class PlaywrightBrowserSession implements AutoCloseable {
         }
     }
 
-    public void searchNext() {
-        // TODO: add search params
-        Locator searchButton = page.locator("#searchCompanyBtn, .callScreen__findBtn");
-
-        try {
-            searchButton.click();
-        } catch (com.microsoft.playwright.TimeoutError e) {
-
-        }
-    }
-
     public void toggleManualMode(boolean manual) {
         if (manual) state.set(BrowserState.MANUAL_MODE);
+    }
+
+    public boolean isAutoSearchEnabled() {
+        return autoSearchEnabled.get();
+    }
+
+    public void setAutoSearchEnabled(boolean enabled) {
+        this.autoSearchEnabled.set(enabled);
     }
 
     public void onStateChanged(Consumer<BrowserState> listener) {
@@ -126,5 +128,55 @@ public final class PlaywrightBrowserSession implements AutoCloseable {
                 }
             });
         }
+    }
+
+    void handleBrowserAction(BrowserAction action) {
+         switch (action) {
+            case BrowserAction.START_DIALOG -> {
+                autoSearchEnabled.set(true);
+                searchNext();
+            }
+            case BrowserAction.END_DIALOG -> {
+                autoSearchEnabled.set(false);
+                endDialog();
+            }
+            case BrowserAction.SKIP_DIALOG -> {
+                autoSearchEnabled.set(true);
+                if (state.get() == BrowserState.CONNECTED) {
+                    endDialog();
+                } else if (state.get() == BrowserState.PAGE_READY) {
+                    searchNext();
+                }
+            }
+        }
+    }
+
+    public void searchNext()
+    {
+        if (state.get() != BrowserState.PAGE_READY) return;
+
+        Locator searchButton = page.locator("#searchCompanyBtn, .callScreen__findBtn");
+
+        try {
+            searchButton.click();
+        } catch (com.microsoft.playwright.TimeoutError e) {
+            System.out.println("Search Next button search timed out");
+        }
+    }
+
+    public void endDialog()
+    {
+        if (state.get() != BrowserState.CONNECTED) return;
+
+        Locator endButton = page.locator(".callScreen__cancelCallBtn");
+        Locator confirmButton = page.locator(".swal2-confirm");
+
+        try {
+            endButton.click();
+            confirmButton.click();
+        } catch (com.microsoft.playwright.TimeoutError e) {
+            System.out.println("End Dialog button search timed out");
+        }
+
     }
 }

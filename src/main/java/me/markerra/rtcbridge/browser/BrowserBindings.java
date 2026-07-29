@@ -1,5 +1,6 @@
 package me.markerra.rtcbridge.browser;
 
+import com.microsoft.playwright.Route;
 import me.markerra.rtcbridge.config.AppConfig;
 import me.markerra.rtcbridge.util.ResourceManager;
 
@@ -33,17 +34,19 @@ public final class BrowserBindings {
         page.addInitScript("sessionStorage.removeItem('__rtc_bridge_state');");
 
         registerStateBinding(page);
+        registerActionBinding(page);
         registerLogBinding(page);
 
         page.addInitScript(STATE_SCRIPT);
 
-        if (config.browser().fakeStreamInput()) {
+        if (config.browser().fakeStreamInput())
             page.addInitScript(INPUT_SCRIPT);
-        }
 
-        if (config.browser().fakeStreamOutput()) {
+        if (config.browser().fakeStreamOutput())
             page.addInitScript(OUTPUT_SCRIPT);
-        }
+
+        if (config.browser().muteConnect())
+            page.route("**/*connect.mp3*", Route::abort);
     }
 
     private void registerStateBinding(Page page) {
@@ -57,6 +60,27 @@ public final class BrowserBindings {
 
             } catch (IllegalArgumentException ignored) {
                 System.err.println("Unknown browser state: " + args[0]);
+            }
+
+            return null;
+        });
+
+    }
+
+    private void registerActionBinding(Page page) {
+        page.exposeBinding("reportActionToJava", (source, args) -> {
+
+            if (args.length == 0)
+                return null;
+
+            try {
+                String actionString = args[0].toString().toUpperCase();
+                BrowserAction action = BrowserAction.valueOf(actionString);
+
+                session.handleBrowserAction(action);
+
+            } catch (IllegalArgumentException ignored) {
+                System.err.println("Unknown browser action: " + args[0]);
             }
 
             return null;

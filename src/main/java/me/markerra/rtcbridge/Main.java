@@ -27,7 +27,6 @@ public final class Main {
         }, "bridge-shutdown"));
         server.start();
         System.out.printf("RTC bridge is listening on ws://%s:%d%n", url, port);
-        System.out.println("Press Ctrl+C to stop it.");
 
         // WebSocketServer uses its own threads. The main thread only keeps the process alive.
         Thread.currentThread().join();

@@ -26,8 +26,13 @@ public final class NektoBrowserApp {
             session.toggleManualMode(manualMode);
 
             session.onStateChanged(state -> {
-                if (state == BrowserState.CAPTCHA_REQUIRED) { System.out.println("CAPTCHA REQUIRED"); }
-                if (state == BrowserState.PAGE_READY) { session.searchNext(); }
+                if (state == BrowserState.CAPTCHA_REQUIRED) {
+                    System.out.println("CAPTCHA REQUIRED");
+                }
+
+                if (state == BrowserState.PAGE_READY && session.isAutoSearchEnabled()) {
+                    session.searchNext();
+                }
             });
 
             session.open(targetUrl);

@@ -25,9 +25,23 @@
     }
 
     const AUDIO = config.audio.format;
-    const FRAME_SAMPLES = (AUDIO.sampleRate * AUDIO.frameDurationMs) / 1000; // 960 для 20мс при 48kHz
+    const FRAME_SAMPLES = (AUDIO.sampleRate * AUDIO.frameDurationMs) / 1000;
 
     log("DEBUG", `Audio format ${AUDIO.sampleRate}Hz ${AUDIO.channels}ch ${AUDIO.bitsPerSample}bit. Using AudioWorklet!`);
+
+    // ==========================================
+    // Mute Sound Effects (connect.mp3)
+    // ==========================================
+    const originalPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+        if (config.browser.muteConnect && (this.src.includes("connect.mp3") || this.currentSrc.includes("connect.mp3"))) {
+            this.muted = true;
+            this.volume = 0;
+            log("INFO", "Muted connection sound: connect.mp3");
+            // return Promise.resolve();
+        }
+        return originalPlay.apply(this, arguments);
+    };
 
     // ==========================
     // WebSocket
@@ -56,6 +70,13 @@
                     if (msg.type === "state" && msg.state === "ready") {
                         this.ready = true;
                         log("INFO", "Bridge ready");
+                    }
+                    // НОВОЕ: Обработка команд от сервера
+                    else if (msg.action) {
+                        log("INFO", `Received action: ${msg.action}`);
+                        if (window.reportActionToJava) {
+                            window.reportActionToJava(msg.action.toUpperCase());
+                        }
                     }
                 } catch {}
             };
@@ -107,12 +128,11 @@
     // ==========================
     // AudioWorklet Generator (Blob)
     // ==========================
-    // Создаем код Worklet-процессора, который будет жить в изолированном аудио-потоке
     const workletCode = `
         class PcmProcessor extends AudioWorkletProcessor {
             constructor() {
                 super();
-                this.targetSamples = ${FRAME_SAMPLES}; // 960 сэмплов (20мс)
+                this.targetSamples = ${FRAME_SAMPLES};
                 this.buffer = new Float32Array(this.targetSamples);
                 this.offset = 0;
             }
@@ -121,7 +141,7 @@
                 const input = inputs[0];
                 if (!input || !input[0]) return true;
 
-                const channelData = input[0]; // Моно-канал (128 сэмплов за квант времени)
+                const channelData = input[0];
                 let i = 0;
 
                 while (i < channelData.length) {
@@ -133,7 +153,6 @@
                     this.offset += toCopy;
                     i += toCopy;
 
-                    // Как только накопили ровно 20мс (960 сэмплов) — конвертируем и шлем на главный поток
                     if (this.offset >= this.targetSamples) {
                         const int16 = new Int16Array(this.targetSamples);
                         for (let j = 0; j < this.targetSamples; j++) {
@@ -141,12 +160,11 @@
                             int16[j] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                         }
                         
-                        // Отправляем готовый PCM-кадр (Transferable ArrayBuffer для нулевой задержки)
                         this.port.postMessage(int16.buffer, [int16.buffer]);
                         this.offset = 0;
                     }
                 }
-                return true; // Держим процессор активным
+                return true; 
             }
         }
         registerProcessor('pcm-processor', PcmProcessor);
@@ -173,36 +191,36 @@
         window.__pcmTrack = tracks[0];
 
         try {
-            // 1. Создаем Blob URL для нашего Worklet-процессора и загружаем в аудио-движок
             const blob = new Blob([workletCode], { type: "application/javascript" });
             const workletUrl = URL.createObjectURL(blob);
             await context.audioWorklet.addModule(workletUrl);
-            URL.revokeObjectURL(workletUrl); // Очищаем ссылку из памяти
+            URL.revokeObjectURL(workletUrl);
 
-            // 2. Создаем узлы аудио-графа
             const source = context.createMediaStreamSource(stream);
             const workletNode = new AudioWorkletNode(context, "pcm-processor");
 
-            const mute = context.createGain();
-            mute.gain.value = 0.001;
+            // 1. Узел для голоса Nekto (полная тишина в динамиках)
+            const nektoGain = context.createGain();
+            nektoGain.gain.value = 0;
 
-            // ==========================================
-            // Oscillator Anchor
-            // ==========================================
+            // 2. Узел для защиты от троттлинга (инфразвук)
+            const anchorGain = context.createGain();
+            anchorGain.gain.value = 0.001;
+
             const anchorOsc = context.createOscillator();
-            anchorOsc.frequency.value = 1; // Любая частота
-            anchorOsc.connect(mute);         // Пускаем в тот же тихий канал
-            anchorOsc.start();               // Запускаем вечный двигатель
-            // ==========================================
+            anchorOsc.frequency.value = 1;
+            anchorOsc.connect(anchorGain);
+            anchorOsc.start();
 
-            // 3. Соединяем граф: Источник -> Worklet -> Gain(тишина) -> Динамики
+            // Соединяем графы параллельно
             source.connect(workletNode);
-            workletNode.connect(mute);
-            mute.connect(context.destination);
+            workletNode.connect(nektoGain);
 
-            // 4. Принимаем готовые 16-битные кадры по 1920 байт напрямую из Worklet-потока
+            nektoGain.connect(context.destination);
+            anchorGain.connect(context.destination);
+
             workletNode.port.onmessage = (event) => {
-                const pcmBuffer = event.data; // ArrayBuffer 1920 bytes
+                const pcmBuffer = event.data;
 
                 callbacks++;
                 samplesReceived += FRAME_SAMPLES;
@@ -215,7 +233,8 @@
                 log("INFO", "Audio track ended");
                 source.disconnect();
                 workletNode.disconnect();
-                mute.disconnect();
+                nektoGain.disconnect();
+                anchorGain.disconnect();
                 context.close();
             };
 
