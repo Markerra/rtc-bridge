@@ -24,6 +24,7 @@
     "debugMode": false,
     "fakeStreamInput": false,
     "fakeStreamOutput": true,
+    "whitelist": true,
     "defaultURL": "https://nekto.me/audiochat",
     "profileDirectory": "data/nekto-profile"
   }

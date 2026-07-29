@@ -8,6 +8,7 @@ public record BrowserConfig(
         boolean debugMode,
         boolean fakeStreamInput,
         boolean fakeStreamOutput,
+        boolean whitelist,
         String defaultURL,
         String profileDirectory
 ) {
@@ -19,6 +20,7 @@ public record BrowserConfig(
             boolean debugMode,
             boolean fakeStreamInput,
             boolean fakeStreamOutput,
+            boolean whitelist,
             String defaultURL,
             String profileDirectory) {
         this.headlessMode = headlessMode;
@@ -28,6 +30,7 @@ public record BrowserConfig(
         this.fakeStreamInput = fakeStreamInput;
         this.fakeStreamOutput = fakeStreamOutput;
         this.debugMode = debugMode;
+        this.whitelist = whitelist;
         this.defaultURL = defaultURL;
         this.profileDirectory = profileDirectory;
     }

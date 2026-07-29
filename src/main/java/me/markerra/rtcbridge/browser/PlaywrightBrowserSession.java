@@ -66,6 +66,25 @@ public final class PlaywrightBrowserSession implements AutoCloseable {
 
         page = context.pages().isEmpty() ? context.newPage() : context.pages().getFirst();
 
+        // whitelist
+        if (config.browser().whitelist()) {
+            context.route("**/*", route -> {
+                String url = route.request().url().toLowerCase();
+
+                boolean isAllowed = url.contains("nekto.me") ||
+                        url.contains("127.0.0.1") ||
+                        url.contains("localhost") ||
+                        url.startsWith("data:") ||
+                        url.startsWith("blob:");
+
+                if (isAllowed) {
+                    route.resume();
+                } else {
+                    route.abort();
+                }
+            });
+        }
+
         BrowserBindings bindings = new BrowserBindings(this, config);
         bindings.register(page);
 
