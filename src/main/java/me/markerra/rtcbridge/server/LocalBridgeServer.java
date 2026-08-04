@@ -46,7 +46,7 @@ public final class LocalBridgeServer extends WebSocketServer {
         // register client with unknown role on the specific channel
         clients.put(connection, new ClientSession(ClientRole.UNKNOWN, channel));
         sendJson(connection, stateMessage("connected"));
-        System.out.printf("Client connected to [%s]: %s%n", channel, connection.getRemoteSocketAddress());
+        System.out.printf("[SERVER] Client connected to [%s]: %s%n", channel, connection.getRemoteSocketAddress());
     }
 
     @Override
@@ -131,7 +131,7 @@ public final class LocalBridgeServer extends WebSocketServer {
     @Override
     public void onClose(WebSocket connection, int code, String reason, boolean remote) {
         clients.remove(connection);
-        System.out.printf("Client disconnected: %s (%s)%n", connection.getRemoteSocketAddress(), reason);
+        System.out.printf("[SERVER] Client disconnected: %s (%s)%n", connection.getRemoteSocketAddress(), reason);
     }
 
     @Override
@@ -172,5 +172,19 @@ public final class LocalBridgeServer extends WebSocketServer {
         message.addProperty("type", "error");
         message.addProperty("message", reason);
         sendJson(connection, message);
+    }
+
+    public void notifyDialogState(boolean active, int timeSeconds) {
+        JsonObject json = new JsonObject();
+        json.addProperty("type", "dialog_state");
+        json.addProperty("active", active);
+        json.addProperty("timeSeconds", timeSeconds);
+
+
+        clients.forEach((client, session) -> {
+            if (session.channel() == ClientChannel.BROWSER && client.isOpen()) {
+                client.send(json.toString());
+            }
+        });
     }
 }

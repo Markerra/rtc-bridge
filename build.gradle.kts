@@ -43,7 +43,6 @@ fun registerClientTask(name: String, mainClassName: String) {
 
 registerClientTask("runTestSource", "me.markerra.rtcbridge.testclient.PcmTestSource")
 registerClientTask("runTestConsumer", "me.markerra.rtcbridge.testclient.PcmTestConsumer")
-registerClientTask("runNektoBrowser", "me.markerra.rtcbridge.browser.NektoBrowserApp")
 
 tasks.register<JavaExec>("installChromium") {
     group = "application"

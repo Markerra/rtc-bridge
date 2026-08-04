@@ -9,7 +9,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -23,6 +27,9 @@ import java.util.function.Consumer;
 public final class PlaywrightBrowserSession implements AutoCloseable {
     private final Path profileDirectory;
 
+    private final AtomicInteger dialogSecondsPassed =
+            new AtomicInteger(0);
+
     private final AtomicReference<BrowserState> state =
             new AtomicReference<>(BrowserState.STARTING);
 
@@ -35,7 +42,12 @@ public final class PlaywrightBrowserSession implements AutoCloseable {
     private BrowserContext context;
     private Page page;
 
-    private final List<Consumer<BrowserState>> listeners =
+    private ScheduledExecutorService scheduler;
+
+    private final List<Consumer<BrowserState>> stateListeners =
+            new CopyOnWriteArrayList<>();
+
+    private final List<Consumer<Integer>> timerListeners =
             new CopyOnWriteArrayList<>();
 
     public PlaywrightBrowserSession(Path profileDirectory, AppConfig config) {
@@ -60,7 +72,9 @@ public final class PlaywrightBrowserSession implements AutoCloseable {
                     "--disable-renderer-backgrounding",
                     "--disable-backgrounding-occluded-windows",
                     "--disable-background-media-suspend",
-                    "--autoplay-policy=no-user-gesture-required"
+                    "--autoplay-policy=no-user-gesture-required",
+                    "--use-fake-device-for-media-stream",
+                    "--use-fake-ui-for-media-stream"
                 ))
         );
 
@@ -130,7 +144,11 @@ public final class PlaywrightBrowserSession implements AutoCloseable {
     }
 
     public void onStateChanged(Consumer<BrowserState> listener) {
-        listeners.add(listener);
+        stateListeners.add(listener);
+    }
+
+    public void onTimerTick(Consumer<Integer> listener) {
+        timerListeners.add(listener);
     }
 
     void changeState(BrowserState nextState) {
@@ -139,7 +157,7 @@ public final class PlaywrightBrowserSession implements AutoCloseable {
         BrowserState previousState = state.getAndSet(nextState);
         if (previousState != nextState) {
             System.out.printf("Browser state: %s -> %s%n", previousState, nextState);
-            listeners.forEach(listener -> {
+            stateListeners.forEach(listener -> {
                 try {
                     listener.accept(nextState);
                 } catch (Exception e) {
@@ -152,15 +170,15 @@ public final class PlaywrightBrowserSession implements AutoCloseable {
     void handleBrowserAction(BrowserAction action) {
          switch (action) {
             case BrowserAction.START_DIALOG -> {
-                autoSearchEnabled.set(true);
+                setAutoSearchEnabled(true);
                 searchNext();
             }
             case BrowserAction.END_DIALOG -> {
-                autoSearchEnabled.set(false);
+                setAutoSearchEnabled(false);
                 endDialog();
             }
             case BrowserAction.SKIP_DIALOG -> {
-                autoSearchEnabled.set(true);
+                setAutoSearchEnabled(true);
                 if (state.get() == BrowserState.CONNECTED) {
                     endDialog();
                 } else if (state.get() == BrowserState.PAGE_READY) {
@@ -198,4 +216,36 @@ public final class PlaywrightBrowserSession implements AutoCloseable {
         }
 
     }
+
+    public int getSecondsPassed() {
+        return dialogSecondsPassed.get();
+    }
+
+    public void startDialogTimer(Consumer<Integer> listener) {
+        resetDialogTimer();
+
+        scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "dialog-timer-thread");
+            thread.setDaemon(true);
+            return thread;
+        });
+
+        scheduler.scheduleAtFixedRate(() -> {
+            int currentSeconds = dialogSecondsPassed.incrementAndGet();
+
+            if (listener != null) {
+                listener.accept(currentSeconds);
+            }
+        }, 1, 1, TimeUnit.SECONDS);
+    }
+
+    public void resetDialogTimer() {
+        dialogSecondsPassed.set(0);
+
+        if (scheduler != null && !scheduler.isShutdown()) {
+            scheduler.shutdownNow();
+            scheduler = null;
+        }
+    }
+
 }

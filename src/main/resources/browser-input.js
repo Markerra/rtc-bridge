@@ -61,6 +61,16 @@
         socket.onmessage = (event) => {
             if (event.data instanceof ArrayBuffer) {
                 pushPCM(event.data);
+            } else if (typeof event.data === "string") {
+                // Ловим текстовые сообщения (включая ошибки от сервера)
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === "error" || msg.message) {
+                        log("ERROR", `Server rejected packet: ${msg.message}`);
+                    }
+                } catch (e) {
+                    log("DEBUG", `Text msg: ${event.data}`);
+                }
             }
         };
 
@@ -79,63 +89,149 @@
 
     const pcmQueue = [];
 
-    function pushPCM(buffer) {
-        const samples = new Int16Array(buffer);
+    // ==========================
+    // PCM queue & Debug
+    // ==========================
 
+    let packetsReceived = 0;
+    let lastLogTime = Date.now();
+
+    function pushPCM(buffer) {
+        packetsReceived++;
+        const samples = new Int16Array(buffer);
         const float = new Float32Array(samples.length);
 
+        const VOLUME_MULT = 1.1;
+
+        let maxAmplitude = 0;
+
+        // Конвертация в Float32 и поиск максимальной громкости в пакете
         for (let i = 0; i < samples.length; i++) {
-            float[i] = samples[i] / 32768;
+            float[i] = (samples[i] / 32768) * VOLUME_MULT;
+            let abs = Math.abs(float[i]);
+            if (abs > maxAmplitude) {
+                maxAmplitude = abs;
+            }
+        }
+
+        // Выводим статистику раз в секунду
+        const now = Date.now();
+        if (now - lastLogTime >= 1000) {
+            log("DEBUG", `[Audio In] Packets/sec: ${packetsReceived} | Max Volume: ${maxAmplitude.toFixed(4)}`);
+            packetsReceived = 0;
+            lastLogTime = now;
         }
 
         if (window.pcmProcessor) window.pcmProcessor.port.postMessage(float);
     }
 
     // ==========================
-    // Fake microphone
+    // Fake microphone & AudioWorklet
     // ==========================
 
     let fakeStream = null;
-
     let audioContext = null;
-
     let destination = null;
-
-    let processor = null;
+    let workletURL = null;
 
     async function createFakeMicrophone() {
-        if (fakeStream) {
-            log("INFO", "Using existing fake stream");
 
-            return fakeStream;
+        if (!audioContext || audioContext.state === "closed") {
+
+            audioContext = new AudioContext({
+                sampleRate: 48000
+            });
+
+            await audioContext.resume();
+
+            const workletCode = `
+        class PCMProcessor extends AudioWorkletProcessor {
+
+            constructor() {
+                super();
+
+                this.buffer = new Float32Array(96000);
+                this.readIndex = 0;
+                this.writeIndex = 0;
+
+                this.port.onmessage = e => {
+                    const data = e.data;
+
+                    for (let i = 0; i < data.length; i++) {
+                        this.buffer[this.writeIndex] = data[i];
+                        this.writeIndex =
+                          (this.writeIndex + 1) % this.buffer.length;
+                    }
+                };
+            }
+
+
+            process(inputs, outputs) {
+
+                const output = outputs[0][0];
+
+                for(let i = 0; i < output.length; i++) {
+
+                    if(this.readIndex !== this.writeIndex) {
+                        output[i] =
+                          this.buffer[this.readIndex];
+
+                        this.readIndex =
+                          (this.readIndex + 1)
+                          % this.buffer.length;
+
+                    } else {
+                        output[i] = 0;
+                    }
+                }
+
+                return true;
+            }
         }
 
-        audioContext = new AudioContext({
-            sampleRate: 48000,
-        });
+        registerProcessor(
+          'pcm-input-processor',
+          PCMProcessor
+        );
+        `;
 
-        await audioContext.resume();
 
-        destination = audioContext.createMediaStreamDestination();
+            const blob = new Blob(
+                [workletCode],
+                {type:"application/javascript"}
+            );
 
-        /*
-              Временно тестовый звук.
-              Потом сюда подключим AudioWorklet.
-            */
+            await audioContext.audioWorklet.addModule(
+                URL.createObjectURL(blob)
+            );
+        }
 
-        const oscillator = audioContext.createOscillator();
 
-        oscillator.frequency.value = 440;
+        if (audioContext.state === "suspended") {
+            await audioContext.resume();
+        }
 
-        oscillator.connect(destination);
 
-        oscillator.start();
+        // ВАЖНО: новый destination каждый раз
 
-        fakeStream = destination.stream;
+        const destination =
+            audioContext.createMediaStreamDestination();
 
-        log("INFO", "Fake microphone created");
 
-        return fakeStream;
+        const processor =
+            new AudioWorkletNode(
+                audioContext,
+                "pcm-input-processor"
+            );
+
+
+        processor.connect(destination);
+
+
+        window.pcmProcessor = processor;
+
+
+        return destination.stream;
     }
 
     // ==========================
@@ -155,6 +251,10 @@
             const fake = await createFakeMicrophone();
 
             const fakeTrack = fake.getAudioTracks()[0];
+
+            log("DEBUG",
+                `Fake track state: ${fakeTrack.readyState}, enabled: ${fakeTrack.enabled}`
+            );
 
             const oldTrack = stream.getAudioTracks()[0];
 

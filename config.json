@@ -22,7 +22,7 @@
     "muteOutput": true,
     "muteConnect": true,
     "debugMode": false,
-    "fakeStreamInput": false,
+    "fakeStreamInput": true,
     "fakeStreamOutput": true,
     "whitelist": true,
     "defaultURL": "https://nekto.me/audiochat",

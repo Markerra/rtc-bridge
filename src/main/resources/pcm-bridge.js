@@ -255,7 +255,7 @@
             set(stream) {
                 descriptor.set.call(this, stream);
                 if (stream) {
-                    this.muted = false;
+                    this.muted = true;
                     this.volume = 0.002;
                     attachStream(stream);
                 }
